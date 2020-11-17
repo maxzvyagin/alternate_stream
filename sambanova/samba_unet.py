@@ -100,7 +100,7 @@ class UNet(nn.Module):
                     (name + "relu1", nn.ReLU(inplace=True)),
                     (
                         name + "conv2",
-                        nn.Conv2d(
+                        sn_exp.Conv2d(
                             in_channels=features,
                             out_channels=features,
                             kernel_size=3,
