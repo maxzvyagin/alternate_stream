@@ -231,7 +231,7 @@ def main(argv: List[str]):
 
     if args.command == "compile":
         # Run model analysis and compile, this step will produce a PEF.
-        samba.session.compile(args, model, inputs, optimizer, name='unet', app_dir=utils.get_file_dir(__file__))
+        samba.session.compile(args, model, inputs, optimizer, app_dir=utils.get_file_dir(__file__))
     elif args.command == "test":
         # Run a numerical check comparing CPU to RDU.
         if args.num_spatial_batches > 1:
