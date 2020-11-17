@@ -10,7 +10,7 @@ import torchvision.transforms as transforms
 
 from typing import Tuple, List
 
-import sambaflows
+import sambaflow
 import sambaflow.samba as samba
 import sambaflow.samba.nn as nn
 import sambaflow.samba.optim as optim
