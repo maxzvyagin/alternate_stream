@@ -29,7 +29,7 @@ from sambaflow.samba.utils.dataset.mnist import dataset_transform
 class UNet(nn.Module):
 
     def __init__(self, in_channels=3, out_channels=20, init_features=32):
-        super(UNet, self).__init__()
+        super().__init__()
 
         features = init_features
         self.encoder1 = UNet._block(in_channels, features, name="enc1")
