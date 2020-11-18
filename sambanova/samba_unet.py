@@ -247,7 +247,7 @@ def main(argv: List[str]):
     args = parse_app_args(argv=argv, common_parser_fn=add_args, run_parser_fn=add_run_args)
 
     # Instantiate the model.
-    model = LogReg(args.num_features, args.num_classes)
+    model = UNet(args.num_features, args.num_classes)
 
     # Instantiate a optimizer.
     optimizer = optim.SGD(model.parameters(), lr=args.lr, momentum=args.momentum, weight_decay=args.weight_decay)
@@ -260,7 +260,7 @@ def main(argv: List[str]):
         samba.session.compile(model,
                               inputs,
                               optimizer,
-                              name='logreg',
+                              name='unet',
                               app_dir=utils.get_file_dir(__file__),
                               config_dict=vars(args))
     elif args.command == "test":
