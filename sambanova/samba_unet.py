@@ -16,6 +16,7 @@ import sambaflow.samba as samba
 import sambaflow.samba.nn as nn
 import sambaflow.samba.optim as optim
 import sambaflow.samba.utils as utils
+import sambaflow.samba.nn_experimental as sn_exp
 
 from sambaflow.samba import to_torch
 from sambaflow.samba.sambatensor import SambaTensor
