@@ -47,6 +47,7 @@ class UNet(keras.Model):
         bottleneck = self.bottleneck(self.pool4(enc4))
 
         dec4 = self.upconv4(bottleneck)
+        print(dec4.shape, enc4.shape)
         dec4 = tf.concat((dec4, enc4), axis=1)
         dec4 = self.decoder4(dec4)
         dec3 = self.upconv3(dec4)
