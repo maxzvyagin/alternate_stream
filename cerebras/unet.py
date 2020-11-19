@@ -16,26 +16,26 @@ class UNet(keras.Model):
 
         features = init_features
         self.encoder1 = UNet._block(in_channels, features, name="enc1")
-        self.pool1 = keras.layers.MaxPool2D(kernel_size=2, strides=2)
+        self.pool1 = keras.layers.MaxPool2D(kernel=2, strides=2)
         self.encoder2 = UNet._block(features, features * 2, name="enc2")
-        self.pool2 = keras.layers.MaxPool2D(kernel_size=2, strides=2)
+        self.pool2 = keras.layers.MaxPool2D(kernel=2, strides=2)
         self.encoder3 = UNet._block(features * 2, features * 4, name="enc3")
-        self.pool3 = keras.layers.MaxPool2D(kernel_size=2, strides=2)
+        self.pool3 = keras.layers.MaxPool2D(kernel=2, strides=2)
         self.encoder4 = UNet._block(features * 4, features * 8, name="enc4")
-        self.pool4 = keras.layers.MaxPool2D(kernel_size=2, strides=2)
+        self.pool4 = keras.layers.MaxPool2D(kernel=2, strides=2)
 
         self.bottleneck = UNet._block(features * 8, features * 16, name="bottleneck")
 
-        self.upconv4 = keras.layers.Conv2DTranspose(features * 8, kernel_size=2, strides=2)
+        self.upconv4 = keras.layers.Conv2DTranspose(features * 8, kernel=2, strides=2)
         self.decoder4 = UNet._block((features * 8) * 2, features * 8, name="dec4")
-        self.upconv3 = keras.layers.Conv2DTranspose(features * 4, kernel_size=2, strides=2)
+        self.upconv3 = keras.layers.Conv2DTranspose(features * 4, kernel=2, strides=2)
         self.decoder3 = UNet._block((features * 4) * 2, features * 4, name="dec3")
-        self.upconv2 = nn.ConvTranspose2d(features * 2, kernel_size=2, strides=2)
+        self.upconv2 = nn.ConvTranspose2d(features * 2, kernel=2, strides=2)
         self.decoder2 = UNet._block((features * 2) * 2, features * 2, name="dec2")
-        self.upconv1 = nn.ConvTranspose2d(features, kernel_size=2, strides=2)
+        self.upconv1 = nn.ConvTranspose2d(features, kernel=2, strides=2)
         self.decoder1 = UNet._block(features * 2, features, name="dec1")
 
-        self.conv = keras.layers.Conv2D(out_channels, kernel_size=1)
+        self.conv = keras.layers.Conv2D(out_channels, kernel=1)
 
     def call(self, x):
         enc1 = self.encoder1(x)
@@ -64,14 +64,14 @@ class UNet(keras.Model):
         block = keras.models.Sequential()
         block.add(keras.layers.Conv2D(
                             features,
-                            kernel_size=3,
+                            kernel=3,
                             padding="valid"
                         ))
         block.add(keras.layers.BatchNormalization())
         block.add(keras.layers.ReLU())
         block.add(keras.layers.Conv2D(
                             features,
-                            kernel_size=3,
+                            kernel=3,
                             padding="valid"
                         ))
         block.add(keras.layers.BatchNormalization())
