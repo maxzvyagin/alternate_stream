@@ -67,14 +67,14 @@ class UNet(keras.Model):
         block.add(keras.layers.Conv2D(
                             features,
                             kernel_size=3,
-                            padding="valid"
+                            padding="same"
                         ))
         block.add(keras.layers.BatchNormalization())
         block.add(keras.layers.ReLU())
         block.add(keras.layers.Conv2D(
                             features,
                             kernel_size=3,
-                            padding="valid"
+                            padding="same"
                         ))
         block.add(keras.layers.BatchNormalization())
         block.add(keras.layers.ReLU())
