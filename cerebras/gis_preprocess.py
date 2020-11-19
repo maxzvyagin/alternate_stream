@@ -407,10 +407,11 @@ def pt_gis_train_test_split(img_and_shps=None, image_type="full_channel", large_
     """ Return PT GIS Datasets with Train Test Split"""
 
     if not img_and_shps:
-        img_and_shps = [("/scratch/mzvyagin/Ephemeral_Channels/Imagery/vhr_2012_refl.img",
-                         "/scratch/mzvyagin/Ephemeral_Channels/Reference/reference_2012_merge.shp"),
-                        ("/scratch/mzvyagin/Ephemeral_Channels/Imagery/vhr_2014_refl.img",
-                         "/scratch/mzvyagin/Ephemeral_Channels/Reference/reference_2014_merge.shp")]
+        img_and_shps = [
+            ("/lus/theta-fs0/projects/CVD-Mol-AI/mzvyagin/Ephemeral_Channels/Imagery/vhr_2012_refl.img",
+             "/lus/theta-fs0/projects/CVD-Mol-AI/mzvyagin/Ephemeral_Channels/Reference/reference_2012_merge.shp"),
+            ("/lus/theta-fs0/projects/CVD-Mol-AI/mzvyagin/Ephemeral_Channels/Imagery/vhr_2014_refl.img",
+             "/lus/theta-fs0/projects/CVD-Mol-AI/mzvyagin/Ephemeral_Channels/Reference/reference_2014_merge.shp")]
 
     samples = []
     for pair in img_and_shps:
