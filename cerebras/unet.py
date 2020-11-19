@@ -90,4 +90,4 @@ class UNet(keras.Model):
 
 # test on lambda system
 if __name__ == "__main__":
-    
+    # load GIS data
