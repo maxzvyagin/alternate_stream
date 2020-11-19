@@ -61,32 +61,22 @@ class UNet(keras.Model):
 
     @staticmethod
     def _block(in_channels, features, name):
-        return keras.models.Sequential(
-            OrderedDict(
-                [
-                    (
-                        name + "conv1",
-                        keras.layers.Conv2D(
+        block = keras.models.Sequential()
+        block.add(keras.layers.Conv2D(
                             features,
                             kernel_size=3,
                             padding="valid"
-                        ),
-                    ),
-                    (name + "norm1", keras.layers.BatchNormalization()),
-                    (name + "relu1", keras.layers.ReLU()),
-                    (
-                        name + "conv2",
-                        keras.layers.Conv2D(
+                        ))
+        block.add(keras.layers.BatchNormalization())
+        block.add(keras.layers.ReLU())
+        block.add(keras.layers.Conv2D(
                             features,
                             kernel_size=3,
                             padding="valid"
-                        ),
-                    ),
-                    (name + "norm2", keras.layers.BatchNormalization()),
-                    (name + "relu2", keras.layers.ReLU()),
-                ]
-            )
-        )
+                        ))
+        block.add(keras.layers.BatchNormalization())
+        block.add(keras.layers.ReLU())
+        return block
 
 # test on lambda system
 if __name__ == "__main__":
