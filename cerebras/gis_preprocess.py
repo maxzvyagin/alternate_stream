@@ -412,7 +412,6 @@ def pt_gis_train_test_split(img_and_shps=None, image_type="full_channel", large_
                         ("/scratch/mzvyagin/Ephemeral_Channels/Imagery/vhr_2014_refl.img",
                          "/scratch/mzvyagin/Ephemeral_Channels/Reference/reference_2014_merge.shp")]
 
-
     samples = []
     for pair in img_and_shps:
         name = "/tmp/mzvyagin/"

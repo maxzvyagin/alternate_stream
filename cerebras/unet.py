@@ -7,7 +7,7 @@ import torch.nn as nn
 
 import tensorflow as tf
 from tensorflow import keras
-
+from gis_preprocess import tf_gis_test_train_split
 
 class UNet(keras.Model):
 
@@ -90,4 +90,18 @@ class UNet(keras.Model):
 
 # test on lambda system
 if __name__ == "__main__":
+    config = {'batch_size': 1, 'learning_rate': .001, 'epochs': 1}
     # load GIS data
+    tf.random.set_seed(0)
+    keras.backend.set_image_data_format('channels_last')
+    b = int(config['batch_size'])
+    model = UNet()
+    opt = tf.keras.optimizers.Adam(learning_rate=config['learning_rate'])
+    model.compile(optimizer=opt, loss=tf.keras.losses.BinaryCrossentropy(from_logits=False),
+                  metrics=['accuracy'])
+    # fit model on gis data
+    (x_train, y_train), (x_test, y_test) = tf_gis_test_train_split()
+    train = tf.data.Dataset.from_tensor_slices((x_train, y_train)).batch(b)
+    test = tf.data.Dataset.from_tensor_slices((x_test, y_test)).batch(b)
+    res = model.fit(train, epochs=config['epochs'], batch_size=b)
+    res_test = model.evaluate(test)
