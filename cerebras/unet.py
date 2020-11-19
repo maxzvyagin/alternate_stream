@@ -27,7 +27,7 @@ class UNet(keras.Model):
 
         self.bottleneck = UNet._block(features * 8, features * 16, name="bottleneck")
 
-        self.upconv4 = keras.layers.Conv2DTranspose(features * 8, kernel_size=2, strides=2)
+        self.upconv4 = keras.layers.Conv2DTranspose(features * 16, kernel_size=2, strides=2)
         self.decoder4 = UNet._block((features * 8) * 2, features * 8, name="dec4")
         self.upconv3 = keras.layers.Conv2DTranspose(features * 4, kernel_size=2, strides=2)
         self.decoder3 = UNet._block((features * 4) * 2, features * 4, name="dec3")
@@ -67,14 +67,14 @@ class UNet(keras.Model):
         block.add(keras.layers.Conv2D(
                             features,
                             kernel_size=3,
-                            padding="same"
+                            padding="valid"
                         ))
         block.add(keras.layers.BatchNormalization())
         block.add(keras.layers.ReLU())
         block.add(keras.layers.Conv2D(
                             features,
                             kernel_size=3,
-                            padding="same"
+                            padding="valid"
                         ))
         block.add(keras.layers.BatchNormalization())
         block.add(keras.layers.ReLU())
