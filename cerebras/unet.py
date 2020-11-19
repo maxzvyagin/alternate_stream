@@ -65,14 +65,14 @@ class UNet(keras.Model):
     def _block(in_channels, features, name):
         block = keras.models.Sequential()
         block.add(keras.layers.Conv2D(
-                            features,
+                            in_channels,
                             kernel_size=3,
                             padding="valid"
                         ))
         block.add(keras.layers.BatchNormalization())
         block.add(keras.layers.ReLU())
         block.add(keras.layers.Conv2D(
-                            features,
+                            in_channels,
                             kernel_size=3,
                             padding="valid"
                         ))
