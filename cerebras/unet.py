@@ -27,7 +27,7 @@ class UNet(keras.Model):
 
         self.bottleneck = UNet._block(features * 8, features * 16, name="bottleneck")
 
-        self.upconv4 = keras.layers.Conv2DTranspose(features * 16, kernel_size=2, strides=2)
+        self.upconv4 = keras.layers.Conv2DTranspose(features * 8, kernel_size=2, strides=2)
         self.decoder4 = UNet._block((features * 8) * 2, features * 8, name="dec4")
         self.upconv3 = keras.layers.Conv2DTranspose(features * 4, kernel_size=2, strides=2)
         self.decoder3 = UNet._block((features * 4) * 2, features * 4, name="dec3")
@@ -48,16 +48,16 @@ class UNet(keras.Model):
 
         dec4 = self.upconv4(bottleneck)
         print(dec4.shape, enc4.shape)
-        dec4 = tf.concat((dec4, enc4), axis=1)
+        dec4 = tf.stack((dec4, enc4), axis=1)
         dec4 = self.decoder4(dec4)
         dec3 = self.upconv3(dec4)
-        dec3 = tf.concat((dec3, enc3), axis=1)
+        dec3 = tf.stack((dec3, enc3), axis=1)
         dec3 = self.decoder3(dec3)
         dec2 = self.upconv2(dec3)
-        dec2 = tf.concat((dec2, enc2), axis=1)
+        dec2 = tf.stack((dec2, enc2), axis=1)
         dec2 = self.decoder2(dec2)
         dec1 = self.upconv1(dec2)
-        dec1 = tf.concat((dec1, enc1), axis=1)
+        dec1 = tf.stack((dec1, enc1), axis=1)
         dec1 = self.decoder1(dec1)
         return keras.activations.sigmoid(self.conv(dec1))
 
