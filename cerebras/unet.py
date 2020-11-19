@@ -80,6 +80,7 @@ class UNet(keras.Model):
 
 # test on lambda system
 if __name__ == "__main__":
+    os.environ['CUDA_VISIBLE_DEVICES'] = '[7]'
     config = {'batch_size': 1, 'learning_rate': .001, 'epochs': 1}
     # load GIS data
     tf.random.set_seed(0)
