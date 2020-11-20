@@ -361,7 +361,7 @@ def main(argv: List[str]):
                                   inputs,
                                   optim,
                                   name='Unet',
-                                  squeeze_bs_dim=True,
+                                  squeeze_bs_dim=False,
                                   app_dir=sn_utils.get_file_dir(__file__),
                                   config_dict=vars(args))
     elif args.command == 'test':
