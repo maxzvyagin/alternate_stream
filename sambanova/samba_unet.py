@@ -1,306 +1,400 @@
-### Model structure is copy paste from https://github.com/mateuszbuda/brain-segmentation-pytorch/blob/master/unet.py
+#!/usr/bin/python
+# encoding: utf-8
 
-from collections import OrderedDict
+# Copyright © 2020 by SambaNova Systems, Inc. Disclosure, reproduction,
+# reverse engineering, or any other use made without the advance written
+# permission of SambaNova Systems, Inc. is unauthorized and strictly
+# prohibited. All rights of ownership and enforcement are reserved.
 
 import argparse
+import numpy as np
 import os
 import sys
-import torch
-import torchvision
-import torchvision.transforms as transforms
-
 from typing import Tuple, List
+
+import torch
+import torch.nn.functional as F
+from torch.utils.data import DataLoader
+from tqdm import tqdm
 
 import sambaflow
 import sambaflow.samba as samba
-import sambaflow.samba.nn as nn
-import sambaflow.samba.optim as optim
-import sambaflow.samba.utils as utils
-import sambaflow.samba.nn_experimental as sn_exp
+import sambaflow.samba.nn as sn
+import sambaflow.samba.utils as sn_utils
 
+from sambaflow.mac.metadata import TilingMetadata
 from sambaflow.samba import to_torch
-from sambaflow.samba.sambatensor import SambaTensor
+from sambaflow.samba.utils import assert_close, set_seed
 from sambaflow.samba.utils.argparser import parse_app_args
 from sambaflow.samba.utils.common import common_app_driver
-from sambaflow.samba.utils.dataset.mnist import dataset_transform
+from sambaflow.models.unet import UNet
+from sambaflow.samba import SambaTensor
+from sambaflow.samba.experiment_logger import AccMeter, DisplayMeter, CountMeter, Logger
 
+from unet_utils.dataset import BrainSegmentationDataset as Dataset
+from unet_utils.utils import DiceLoss, transforms
 
-
-class UNet(nn.Module):
-
-    def __init__(self, in_channels=3, out_channels=20, init_features=32):
-        super().__init__()
-
-        features = init_features
-        self.encoder1 = UNet._block(in_channels, features, name="enc1")
-        self.pool1 = sn_exp.MaxPool2d(kernel_size=2, stride=2)
-        self.encoder2 = UNet._block(features, features * 2, name="enc2")
-        self.pool2 = sn_exp.MaxPool2d(kernel_size=2, stride=2)
-        self.encoder3 = UNet._block(features * 2, features * 4, name="enc3")
-        self.pool3 = sn_exp.MaxPool2d(kernel_size=2, stride=2)
-        self.encoder4 = UNet._block(features * 4, features * 8, name="enc4")
-        self.pool4 = sn_exp.MaxPool2d(kernel_size=2, stride=2)
-
-        self.bottleneck = UNet._block(features * 8, features * 16, name="bottleneck")
-
-        self.upconv4 = sn_exp.ConvTranspose2d(
-            features * 16, features * 8, kernel_size=2, stride=2
-        )
-        self.decoder4 = UNet._block((features * 8) * 2, features * 8, name="dec4")
-        self.upconv3 = sn_exp.ConvTranspose2d(
-            features * 8, features * 4, kernel_size=2, stride=2
-        )
-        self.decoder3 = UNet._block((features * 4) * 2, features * 4, name="dec3")
-        self.upconv2 = sn_exp.ConvTranspose2d(
-            features * 4, features * 2, kernel_size=2, stride=2
-        )
-        self.decoder2 = UNet._block((features * 2) * 2, features * 2, name="dec2")
-        self.upconv1 = sn_exp.ConvTranspose2d(
-            features * 2, features, kernel_size=2, stride=2
-        )
-        self.decoder1 = UNet._block(features * 2, features, name="dec1")
-
-        self.conv = sn_exp.Conv2d(
-            in_channels=features, out_channels=out_channels, kernel_size=1
-        )
-
-    def forward(self, x):
-        enc1 = self.encoder1(x)
-        enc2 = self.encoder2(self.pool1(enc1))
-        enc3 = self.encoder3(self.pool2(enc2))
-        enc4 = self.encoder4(self.pool3(enc3))
-
-        bottleneck = self.bottleneck(self.pool4(enc4))
-
-        dec4 = self.upconv4(bottleneck)
-        dec4 = samba.cat((dec4, enc4), dim=1)
-        dec4 = self.decoder4(dec4)
-        dec3 = self.upconv3(dec4)
-        dec3 = samba.cat((dec3, enc3), dim=1)
-        dec3 = self.decoder3(dec3)
-        dec2 = self.upconv2(dec3)
-        dec2 = samba.cat((dec2, enc2), dim=1)
-        dec2 = self.decoder2(dec2)
-        dec1 = self.upconv1(dec2)
-        dec1 = samba.cat((dec1, enc1), dim=1)
-        dec1 = self.decoder1(dec1)
-        return samba.sigmoid(self.conv(dec1))
-
-    @staticmethod
-    def _block(in_channels, features, name):
-        return nn.Sequential(
-            OrderedDict(
-                [
-                    (
-                        name + "conv1",
-                        sn_exp.Conv2d(
-                            in_channels=in_channels,
-                            out_channels=features,
-                            kernel_size=3,
-                            padding=1,
-                        ),
-                    ),
-                    #name + "norm1", nn.BatchNorm2d(num_features=features)),
-                    (name + "relu1", nn.ReLU(inplace=True)),
-                    (
-                        name + "conv2",
-                        sn_exp.Conv2d(
-                            in_channels=features,
-                            out_channels=features,
-                            kernel_size=3,
-                            padding=1,
-                        ),
-                    ),
-                    #(name + "norm2", nn.BatchNorm2d(num_features=features)),
-                    (name + "relu2", nn.ReLU(inplace=True)),
-                ]
-            )
-        )
-
-def prepare_dataloader(args: argparse.Namespace) -> Tuple[torch.utils.data.DataLoader]:
-    train_dataset = torchvision.datasets.VOCSegmentation(root=f'{args.data_folder}',
-                                               train=True,
-                                               transform=dataset_transform(args),
-                                               download=True)
-    test_dataset = torchvision.datasets.VOCSegmentation(root=f'{args.data_folder}',
-                                              train=False,
-                                              transform=dataset_transform(args))
-
-    # Data loader (input pipeline)
-    train_loader = torch.utils.data.DataLoader(dataset=train_dataset, batch_size=args.batch_size, shuffle=True)
-    test_loader = torch.utils.data.DataLoader(dataset=test_dataset, batch_size=args.batch_size, shuffle=False)
-    return train_loader, test_loader
-
-
-def train(args: argparse.Namespace, model: nn.Module, optimizer: optim.SGD) -> None:
-    train_loader, test_loader = prepare_dataloader(args)
-    # Train the model
-    total_step = len(train_loader)
-    hyperparam_dict = {"lr": args.lr, "momentum": args.momentum, "weight_decay": args.weight_decay}
-    for epoch in range(args.num_epochs):
-        avg_loss = 0
-        for i, (images, labels) in enumerate(train_loader):
-            sn_images = samba.from_torch(images, name='image', batch_dim=0)
-            sn_labels = samba.from_torch(labels, name='label', batch_dim=0)
-
-            loss, outputs = model.run([sn_images, sn_labels], hyperparam_dict=hyperparam_dict)
-            loss, outputs = samba.to_torch(loss), samba.to_torch(outputs)
-            avg_loss += loss.mean()
-
-            if (i + 1) % 10000 == 0:
-                print('Epoch [{}/{}], Step [{}/{}], Loss: {:.4f}'.format(epoch + 1, args.num_epochs, i + 1, total_step,
-                                                                         avg_loss / (i + 1)))
-
-        model.cpu()
-        test_acc = 0.0
-        with torch.no_grad():
-            correct = 0
-            total = 0
-            total_loss = 0
-            for images, labels in test_loader:
-                loss, outputs = model(images, labels)
-                loss, outputs = samba.to_torch(loss), samba.to_torch(outputs)
-                total_loss += loss.mean()
-                _, predicted = torch.max(outputs.data, 1)
-                total += labels.size(0)
-                correct += (predicted == labels).sum()
-
-            test_acc = 100.0 * correct / total
-            print('Test Accuracy: {:.2f}'.format(test_acc),
-                  ' Loss: {:.4f}'.format(total_loss.item() / (len(test_loader))))
-
-        if args.acc_test:
-            assert args.num_epochs == 1, "Accuracy test only supported for 1 epoch"
-            assert test_acc > 91.0 and test_acc < 92.0, "Test accuracy not within specified bounds."
-        if args.checkpoint:
-            save_tensor_list = [model.lin_layer.weight]
-            utils.checkpoint.save_tensors(save_tensor_list)
-
+import pickle
 
 def add_args(parser: argparse.ArgumentParser):
-    parser.add_argument('--lr', type=float, default=0.001, help="Learning rate for training")
-    parser.add_argument('--momentum', type=float, default=0.0, help="Momentum value for training")
-    parser.add_argument('--weight-decay', type=float, default=1e-4, help="Weight decay for training")
-    parser.add_argument('-e', '--num-epochs', type=int, default=1)
-    parser.add_argument('--num-features', type=int, default=784)
-    parser.add_argument('--num-classes', type=int, default=10)
-    parser.add_argument('--acc-test', action='store_true', help='Option for accuracy guard test in CH regression.')
-    parser.add_argument('--checkpoint', action="store_true", help="Save model checkpoint every epoch")
-
-
-def add_run_args(parser: argparse.ArgumentParser):
-    parser.add_argument('--data-folder',
+    parser.add_argument('--in-height', type=int, default=32, help='Height of the input image')
+    parser.add_argument('--in-width', type=int, default=32, help='Width of the input image')
+    parser.add_argument('--in-channels', type=int, default=3, help='Number of channels in the input image')
+    parser.add_argument('--out-channels', type=int, default=1, help='Number of channels in the output image')
+    parser.add_argument('--init-features', type=int, default=32, help='Number of initial features for first conv')
+    parser.add_argument('--enable-tiling', type=bool, default=False, help='Enable DRAM tiling')
+    parser.add_argument('--num-row-tiles', type=int, default=2, help='If tiling is enabled, number of row tiles')
+    parser.add_argument('--num-col-tiles', type=int, default=2, help='If tiling is enabled, num of col tiles')
+    parser.add_argument('--host-row-padding',
+                        type=int,
+                        default=2,
+                        help='If tiling is enabled, amount of row padding to add on host')
+    parser.add_argument('--host-col-padding',
+                        type=int,
+                        default=2,
+                        help='If tiling is enabled, amount of col padding to add on host')
+    parser.add_argument('--default-par-factors', action="store_true")
+    parser.add_argument(
+        "--epochs",
+        type=int,
+        default=100,
+        help="number of epochs to train (default: 100)",
+    )
+    parser.add_argument(
+        "--lr",
+        type=float,
+        default=0.0001,
+        help="initial learning rate (default: 0.001)",
+    )
+    parser.add_argument(
+        "--workers",
+        type=int,
+        default=0,
+        help="number of workers for data loading (default: 1)",
+    )
+    parser.add_argument("--images", type=str, default="./kaggle_3m", help="root folder with images")
+    parser.add_argument(
+        "--image-size",
+        type=int,
+        default=32,
+        help="target input image size (default: 256)",
+    )
+    parser.add_argument(
+        "--aug-scale",
+        type=int,
+        default=0.05,
+        help="scale factor range for augmentation (default: 0.05)",
+    )
+    parser.add_argument(
+        "--aug-angle",
+        type=int,
+        default=15,
+        help="rotation angle range in degrees for augmentation (default: 15)",
+    )
+    parser.add_argument('--ch', action="store_true")
+    parser.add_argument('--model-dir',
                         type=str,
-                        default='mnist_data',
-                        help="The folder to download the MNIST dataset to.")
+                        default='sambaflow/apps/image/samba/unet/model_dir',
+                        help='location for training outputs and checkpoints')
+    parser.add_argument('--use-real-data', action="store_true", help="Run the training on real data")
+    parser.add_argument('--run-backward', action="store_true", help="Run backward")
 
 
-def test(args: argparse.Namespace, model: nn.Module, inputs: Tuple[samba.SambaTensor], optimizer: optim.SGD) -> None:
-    # Run a numerical check to ensure CPU and RDU runs are consistent.
-    # Run CPU version of model.
-    outputs_gold = model(*inputs)
-    # Run RDU version of model.
-    outputs_samba = model.run(inputs)
+def get_inputs(args: argparse.Namespace, tiled=False) -> Tuple[samba.SambaTensor]:
+    # If tiling is enabled, we trace the graph with the tile size, and pass the original size through tiling metadata
+    if tiled:
+        assert args.in_height % args.num_row_tiles == 0, "Input image is not evenly divisible by row tiles"
+        assert args.in_width % args.num_col_tiles == 0, "Input image is not evenly divisible by col tiles"
+        height = args.in_height // args.num_row_tiles
+        width = args.in_width // args.num_col_tiles
+    else:
+        height = args.in_height
+        width = args.in_width
 
-    # check that all samba and torch outputs match numerically
-    for i, (output_samba, output_gold) in enumerate(zip(outputs_samba, outputs_gold)):
-        utils.assert_close(output_samba, output_gold, f'forward output #{i}', threshold=3e-3, visualize=args.visualize)
-
-    # training mode, check two of the gradients
-    torch_loss, torch_gemm_out = outputs_gold
-    torch_loss.mean().backward()
-
-    # we choose two gradients from different places to test numerically
-    gemm1_grad_gold = model.lin_layer.weight.grad
-    gemm1_grad_samba = model.lin_layer.weight.sn_grad
-    utils.assert_close(gemm1_grad_gold,
-                       gemm1_grad_samba,
-                       'lin_layer__weight__grad',
-                       threshold=3e-3,
-                       visualize=args.visualize)
+    return (samba.randn(args.batch_size, args.in_channels, height, width, name='input', batch_dim=0,
+                        requires_grad=True), )
 
 
-def test_spatial(args: argparse.Namespace, model: nn.Module, inputs: Tuple[samba.SambaTensor], optimizer: optim.SGD,
-                 mini_batch_size: int) -> None:
-    # Similiar to test
-    # Run CPU version of model
-    for idx in range(args.num_spatial_batches):
-        start_idx, end_idx = mini_batch_size * idx, mini_batch_size * (idx + 1)
-        image, label = to_torch(inputs[0]), to_torch(inputs[1])
-        input_sliced = (image[start_idx:end_idx, :], label[start_idx:end_idx])
+def prepare_for_tiling(args: argparse.Namespace, padded_input_shape: samba.SambaTensor) -> None:
+    """
+    Change the shapes of inputs and input grad. This is necessary because tiling requires padding on the host.
+    The input shapes are different when they are traced.
+    """
+    assert len(samba.session.tensor_dict['inputs']) == 1, "Only one input expected"
 
-        optimizer.zero_grad()
-        gold_loss, gold_output = model(*input_sliced)
-        gold_loss.mean().backward()
-        optimizer.step()
-    gold_weight = model.lin_layer.weight
-    # Run RDU version of model
-    model.run(inputs)
-    utils.assert_close(gold_weight.sn_data, gold_weight, 'weight',
-                       0.01)  #FIXME(tanl) Checking the correctness based on one iteration seems not right
+    # Modify the shapes of the input and input grad tensor.
+    samba.session.tensor_dict['inputs']['input'] = samba.SambaTensor(torch.zeros(padded_input_shape),
+                                                                     name='input',
+                                                                     batch_dim=0)
+
+    if not args.inference:
+        samba.session.tensor_dict['grads']['input__grad'] = samba.SambaTensor(torch.zeros(padded_input_shape),
+                                                                              name='input_grad',
+                                                                              batch_dim=0)
+
+
+def test(args: argparse.Namespace, inputs: Tuple[samba.SambaTensor], model: sn.Module) -> None:
+    if args.enable_tiling:
+        test_inputs = get_inputs(args, False)
+
+        # TODO(tejasn): Host padding of input tensor. This should not be an input from the test but should be
+        # computed within tiled conv utils.
+        padded_input = F.pad(
+            samba.to_torch(test_inputs[0]),
+            [args.host_col_padding, args.host_col_padding, args.host_row_padding, args.host_row_padding])
+
+        padded_input = samba.SambaTensor(padded_input, name='input', batch_dim=0)
+        prepare_for_tiling(args, padded_input.shape)
+
+        samba.session.to_device()
+        gold_outputs = model(*test_inputs)
+        inputs = (padded_input, )
+        samba_outputs = model.run(inputs)[0]
+    else:
+        samba.session.to_device()
+        gold_outputs = model(*inputs)
+        samba_outputs = model.run(inputs)[0]
+
+    print(f'gold_output_abs_sum: {gold_outputs.abs().sum()}', gold_outputs)
+    print(f'samba_output_abs_sum: {samba_outputs.abs().sum()}', samba_outputs)
+    sn_utils.assert_close(samba_outputs, gold_outputs, 'output', threshold=3e-3)
+
+    if args.run_backward:
+        output_grad = samba.randn_like(gold_outputs)
+        gold_outputs.backward(output_grad)
+        model.run(inputs, grad_of_outputs=[output_grad])[0]
+
+        # checking input grad and last grad
+        if args.enable_tiling:
+            gold_input_grad = test_inputs[0].grad
+        else:
+            gold_input_grad = inputs[0].grad
+        samba_input_grad = inputs[0].sn_grad
+
+        # Unpadding the image for the tiled version before comparing.
+        if args.enable_tiling:
+            samba_input_grad = samba.from_torch(
+                samba.to_torch(samba_input_grad)
+                [:, :, args.host_col_padding:-args.host_col_padding, args.host_row_padding:-args.host_row_padding])
+
+        print(f'gold_input_grad_abs_sum: {gold_input_grad.abs().sum()}')
+        print(f'samba_input_grad_abs_sum: {samba_input_grad.data.abs().sum()}')
+        sn_utils.assert_close(gold_input_grad, samba_input_grad, 'input_grad', threshold=0.05, visualize=args.visualize)
+
+        gold_weight_grad = model.down1.two_conv.conv1.weight.grad
+        samba_weight_grad = model.down1.two_conv.conv1.weight.sn_grad
+
+        print(f'gold_weight_grad_abs_sum: {gold_weight_grad.abs().sum()}')
+        print(f'samba_weight_grad_abs_sum: {samba_weight_grad.abs().sum()}')
+        # TODO(tejasn): The weight grad mismatch for the tiling version is large. The mismatch will be much lower once
+        # we add support for 9-tile version.
+        sn_utils.assert_close(gold_weight_grad,
+                              samba_weight_grad,
+                              'weight_grad',
+                              threshold=3.1 if args.enable_tiling else 0.22,
+                              rtol=0.1,
+                              visualize=args.visualize)
+
+
+def tiled_compile(args: argparse.Namespace,
+                  model: sn.Module,
+                  inputs: Tuple[samba.SambaTensor],
+                  optim: samba.optim.SGD = None,
+                  name: str = None,
+                  squeeze_bs_dim=False,
+                  app_dir=None) -> str:
+
+    metadata = dict()
+    original_size = [args.batch_size, args.in_channels, args.in_height, args.in_width]
+    dummy_input = torch.randn(original_size)
+
+    metadata[TilingMetadata.key] = TilingMetadata(original_size=original_size,
+                                                  num_tiles=[args.batch_size, args.num_row_tiles, args.num_col_tiles])
+
+    return samba.session.compile(model,
+                                 inputs,
+                                 optim,
+                                 name=name,
+                                 squeeze_bs_dim=squeeze_bs_dim,
+                                 app_dir=app_dir,
+                                 metadata=metadata,
+                                 config_dict=vars(args))
+
+
+def train(args: argparse.Namespace, model: sn.Module, optimizer, ch=False):
+    if args.enable_tiling and ch:
+        padded_input_shape = [
+            args.batch_size, args.in_channels, args.in_height + 2 * args.host_row_padding,
+            args.in_width + 2 * args.host_col_padding
+        ]
+        prepare_for_tiling(args, padded_input_shape)
+
+    if ch:
+        samba.session.to_device()
+
+    loader_train, loader_valid = data_loaders(args)
+    logger = get_loggers()
+    dsc_loss = DiceLoss()
+
+    step = 0
+    best_validation_dsc = 0.0
+
+    pbar = tqdm(range(args.epochs), total=args.epochs, dynamic_ncols=True)
+
+    for epoch in pbar:
+        model.train()
+
+        for batch_index, (x, y) in enumerate(loader_train):
+
+            if not ch:
+                model.zero_grad()
+                gold = model(x)
+                loss = dsc_loss(samba.to_torch(gold), y)
+                loss.backward()
+                optimizer.step()
+
+            else:
+                ### Run dice_loss in torch
+                section_types = ['fwd']
+
+                # Pad the input if tiling is enabled.
+                if args.enable_tiling:
+                    x = F.pad(
+                        x, [args.host_col_padding, args.host_col_padding, args.host_row_padding, args.host_row_padding])
+                xs = samba.from_torch(x)
+                samba_outputs = model.run((samba.from_torch(x), ), section_types=section_types)[0]
+                samba_outputs.requires_grad_(True)
+                loss = dsc_loss(samba.to_torch(samba_outputs), y)
+
+                loss.backward()
+                section_types = ['bckwd', 'opt']
+                samba.session.ctx.set_tensors({"sigmoid__outputs__0__grad": samba_outputs.grad.numpy()})
+                model.run((samba.from_torch(x), ), section_types=section_types)
+
+            logger.update({"loss": loss.mean().item()})
+            logger.dump(args.model_dir, logger.meters.keys())
+            logger.update({"train_step": 1})
+            pbar.set_description(str(logger))
+            step += 1
+
+
+def get_loggers():
+    """
+    Helpers to return the train and test loggers.
+    """
+    train_logger_dict = {
+        'train_step': CountMeter(),
+        'loss': DisplayMeter(format="0.8f"),
+    }
+    train_logger = Logger(train_logger_dict)
+    return train_logger
+
+
+def data_loaders(args):
+    dataset_train, dataset_valid = datasets(args)
+
+    loader_train = DataLoader(dataset_train,
+                              batch_size=args.batch_size,
+                              shuffle=True,
+                              drop_last=True,
+                              num_workers=args.workers)
+
+    loader_valid = DataLoader(dataset_valid, batch_size=args.batch_size, drop_last=False, num_workers=args.workers)
+
+    return loader_train, loader_valid
+
+
+def datasets(args):
+    f = open("pt_gis_rgb.pkl")
+    train, valid = pickle.load(f)
+    return train, valid
+    # train = Dataset(
+    #     images_dir=args.images,
+    #     subset="train",
+    #     image_size=args.image_size,
+    #     transform=transforms(scale=args.aug_scale, angle=args.aug_angle, flip_prob=0.5),
+    # )
+    # valid = Dataset(
+    #     images_dir=args.images,
+    #     subset="validation",
+    #     image_size=args.image_size,
+    #     random_sampling=False,
+    # )
+    # return train, valid
+
 
 
 def main(argv: List[str]):
     # Set random seed for reproducibility.
-    utils.set_seed(256)
+    sn_utils.set_seed(256)
 
     # Get common args and any user added args.
-    args = parse_app_args(argv=argv, common_parser_fn=add_args, run_parser_fn=add_run_args)
-
-    # Instantiate the model.
-    model = UNet(args.num_features, args.num_classes)
-
-    # Instantiate a optimizer.
-    optimizer = optim.SGD(model.parameters(), lr=args.lr, momentum=args.momentum, weight_decay=args.weight_decay)
+    args = parse_app_args(argv=argv, common_parser_fn=add_args)
 
     # Dummy inputs required for tracing.
-    inputs = (samba.randn(args.batch_size, args.num_features, name='image',
-                          batch_dim=0), samba.randint(args.num_classes, (args.batch_size, ), name='label', batch_dim=0))
-    if args.command == "compile":
-        # Run model analysis and compile, this step will produce a PEF.
-        samba.session.compile(model,
-                              inputs,
-                              optimizer,
-                              name='unet',
-                              app_dir=utils.get_file_dir(__file__),
-                              config_dict=vars(args))
-    elif args.command == "test":
-        # Run a numerical check comparing CPU to RDU.
-        if args.mapping == 'spatial':
-            # spatial
-            mini_batch_size = args.batch_size
-            args.batch_size *= args.num_spatial_batches
-            inputs = (SambaTensor(samba.to_torch(inputs[0]).repeat(args.num_spatial_batches, 1),
-                                  name='image',
-                                  batch_dim=0),
-                      SambaTensor(samba.to_torch(inputs[1]).repeat(args.num_spatial_batches), name='label',
-                                  batch_dim=0))
-            utils.trace_graph(model, inputs, optimizer, config_dict=vars(args))
-            test_spatial(args, model, inputs, optimizer, mini_batch_size)
+    inputs = get_inputs(args)
+    print(f'Inputs: {[d.shape for d in inputs]}')
+
+    # Instantiate the model.
+    model = UNet(in_channels=args.in_channels, out_channels=args.out_channels, init_features=args.init_features)
+
+    # Instantiate a optimizer.
+    optim = samba.optim.AdamW(model.parameters(), lr=args.lr, betas=(0.9, 0.997),
+                              weight_decay=0) if not args.inference else None
+    if not args.inference: inputs[0].requires_grad_(True)
+
+    if args.inference:
+        model.eval()
+
+    if args.command == 'compile':
+        inputs = get_inputs(args, args.enable_tiling)
+        if args.enable_tiling:
+            tiled_compile(args,
+                          model,
+                          inputs,
+                          optim,
+                          name='Unet',
+                          squeeze_bs_dim=True,
+                          app_dir=sn_utils.get_file_dir(__file__))
         else:
-            # section by section
-            utils.trace_graph(model, inputs, optimizer, config_dict=vars(args))
-            test(args, model, inputs, optimizer)
+            samba.session.compile(model,
+                                  inputs,
+                                  optim,
+                                  name='Unet',
+                                  squeeze_bs_dim=True,
+                                  app_dir=sn_utils.get_file_dir(__file__),
+                                  config_dict=vars(args))
+    elif args.command == 'test':
+        # Test numerical correctness between CPU and RDU
+        sn_utils.trace_graph(model, inputs, optim, squeeze_bs_dim=True, transfer_device=False, config_dict=vars(args))
+        test(args, inputs, model)
     elif args.command == "measure-performance":
         # Get inference latency and throughput statistics
-        utils.trace_graph(model, inputs, optimizer, config_dict=vars(args))
-        utils.measure_performance(model,
-                                  inputs,
-                                  args.batch_size,
-                                  run_graph_only=args.run_graph_only,
-                                  n_iterations=args.num_iterations,
-                                  json=args.json,
-                                  data_parallel=args.data_parallel,
-                                  world_size=args.world_size,
-                                  reduce_on_rdu=args.reduce_on_rdu,
-                                  min_duration=args.min_duration)
+        sn_utils.trace_graph(model, inputs, optim, squeeze_bs_dim=True, config_dict=vars(args))
+        sn_utils.measure_performance(model,
+                                     inputs,
+                                     args.batch_size,
+                                     run_graph_only=args.run_graph_only,
+                                     n_iterations=args.num_iterations,
+                                     json=args.json,
+                                     data_parallel=args.data_parallel,
+                                     world_size=args.world_size,
+                                     reduce_on_rdu=args.reduce_on_rdu,
+                                     min_duration=args.min_duration)
     elif args.command == "run":
-        # Train Logreg model
-        utils.trace_graph(model, inputs, optimizer, config_dict=vars(args))
-        train(args, model, optimizer)
+        # Train the model
+        sn_utils.trace_graph(model, inputs, optim, squeeze_bs_dim=True, transfer_device=False, config_dict=vars(args))
+        train(args, model, optim, args.ch)
+
     else:
         # This section of the code will be removed soon for packaging purposes (use --debug in your commands to invoke all remaining functions)
-        common_app_driver(args, model, inputs, optimizer, name='logreg', app_dir=utils.get_file_dir(__file__))
+        common_app_driver(args,
+                          model,
+                          inputs,
+                          optim,
+                          'Unet',
+                          squeeze_bs_dim=True,
+                          app_dir=sn_utils.get_file_dir(__file__))
 
 
 if __name__ == '__main__':
